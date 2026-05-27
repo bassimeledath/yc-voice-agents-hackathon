@@ -1,0 +1,403 @@
+#
+# NVIDIA WebSocket STT Service for Pipecat
+#
+# Connects to NVIDIA Parakeet ASR server via WebSocket for streaming transcription.
+#
+
+"""NVIDIA Parakeet streaming speech-to-text service implementation."""
+
+import asyncio
+import json
+import time
+from collections.abc import AsyncGenerator
+
+import websockets
+from loguru import logger
+from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
+    ErrorFrame,
+    Frame,
+    InterimTranscriptionFrame,
+    StartFrame,
+    TranscriptionFrame,
+    UserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.stt_service import WebsocketSTTService
+from pipecat.utils.time import time_now_iso8601
+
+
+def _strip_committed_prefix(interim_text: str, committed_tokens: list[str]) -> str | None:
+    """Strip already-finalized tokens from a cumulative interim transcript."""
+    interim_tokens = interim_text.split()
+    if interim_tokens[: len(committed_tokens)] != committed_tokens:
+        return None
+    return " ".join(interim_tokens[len(committed_tokens):])
+
+
+class NVidiaWebSocketSTTService(WebsocketSTTService):
+    """NVIDIA Parakeet streaming speech-to-text service.
+
+    Provides real-time speech recognition using NVIDIA's Parakeet ASR model
+    via WebSocket. Supports interim results for responsive transcription.
+
+    Turn finalization is driven by ``VADUserStoppedSpeakingFrame``: when VAD
+    detects end-of-speech, this service sends a "hard" reset that asks the
+    server to inject finalization silence and return the final transcript as
+    quickly as possible. That final is emitted as a ``finalized=True``
+    ``TranscriptionFrame``, which lets a turn-analyzer stop strategy
+    (e.g. ``TurnAnalyzerUserTurnStopStrategy``) end the user turn immediately
+    instead of falling back to its ``user_turn_stop_timeout``.
+
+    The server expects:
+    - Audio: 16-bit PCM, 16kHz, mono
+    - Reset signal: {"type": "reset", "finalize": true/false}
+
+    The server sends:
+    - Ready: {"type": "ready"}
+    - Transcript: {"type": "transcript", "text": "...", "is_final": true/false}
+    """
+
+    def __init__(
+        self,
+        *,
+        url: str = "ws://localhost:8080",
+        sample_rate: int = 16000,
+        strip_interim_prefix: bool = True,
+        **kwargs,
+    ):
+        """Initialize the NVIDIA STT service.
+
+        Args:
+            url: WebSocket URL of the NVIDIA ASR server.
+            sample_rate: Audio sample rate (must be 16000 for Parakeet).
+            strip_interim_prefix: Strip already-finalized tokens from cumulative interims.
+            **kwargs: Additional arguments passed to the parent WebsocketSTTService.
+        """
+        super().__init__(sample_rate=sample_rate, **kwargs)
+        self._url = url
+        self._strip_interim_prefix = strip_interim_prefix
+        self._websocket = None
+        self._receive_task: asyncio.Task | None = None
+        self._ready = False
+        self._committed_tokens: list[str] = []
+        # Lock to ensure any in-progress audio send completes before reset
+        self._audio_send_lock = asyncio.Lock()
+        # Diagnostic: track audio bytes sent since last reset
+        self._audio_bytes_sent = 0
+
+        # Set when we send the finalization (hard) reset on VAD silence, and
+        # cleared once the matching final transcript arrives.
+        self._waiting_for_final: bool = False
+
+    def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics."""
+        return True
+
+    async def start(self, frame: StartFrame):
+        """Start the NVIDIA STT service.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
+        await super().start(frame)
+        await self._connect()
+
+    async def stop(self, frame: EndFrame):
+        """Stop the NVIDIA STT service.
+
+        Args:
+            frame: The end frame.
+        """
+        # Send HARD reset to ensure any buffered audio is transcribed
+        await self._send_reset(finalize=True)
+        await super().stop(frame)
+        await self._disconnect()
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the NVIDIA STT service.
+
+        Args:
+            frame: The cancel frame.
+        """
+        self._waiting_for_final = False
+        # Send HARD reset to capture any remaining buffered audio
+        # This ensures words at the end of audio aren't lost when pipeline is cancelled
+        await self._send_reset(finalize=True)
+        # Wait briefly for server to process the reset and send response
+        # Without this, we disconnect before receiving the final transcript
+        if self._websocket and self._ready:
+            try:
+                msg = await asyncio.wait_for(self._websocket.recv(), timeout=0.5)
+                data = json.loads(msg)
+                if data.get("type") == "transcript" and data.get("is_final"):
+                    await self._handle_transcript(data)
+            except (TimeoutError, Exception):
+                pass  # Best effort - don't block cancel on network issues
+        await super().cancel(frame)
+        await self._disconnect()
+
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+        """Send audio data to NVIDIA ASR server for transcription.
+
+        Args:
+            audio: Raw audio bytes (16-bit PCM, 16kHz, mono).
+
+        Yields:
+            Frame: None (transcription results come via WebSocket receive task).
+        """
+        if self._websocket and self._ready:
+            try:
+                async with self._audio_send_lock:
+                    self._audio_bytes_sent += len(audio)
+                    await self._websocket.send(audio)
+            except Exception as e:
+                logger.error(f"{self} failed to send audio: {e}")
+                await self._report_error(ErrorFrame(f"Failed to send audio: {e}"))
+        yield None
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames, finalizing the utterance on VAD end-of-speech.
+
+        Finalization is driven by ``VADUserStoppedSpeakingFrame``: when VAD
+        detects end-of-speech we send a hard reset so the server injects
+        finalization silence and returns the final transcript quickly. The
+        resulting ``finalized=True`` ``TranscriptionFrame`` lets a downstream
+        turn-analyzer stop strategy end the user turn without waiting on its
+        ``user_turn_stop_timeout``.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame processing.
+        """
+        # A new turn is starting; reset finalization state.
+        if isinstance(frame, UserStartedSpeakingFrame):
+            self._waiting_for_final = False
+            await super().process_frame(frame, direction)
+            return
+
+        # All frames pass through normally (in particular VADUserStoppedSpeaking
+        # must reach the turn analyzer before our final transcript does).
+        await super().process_frame(frame, direction)
+
+        # Finalize on VAD silence. VAD fires after ~200ms of silence, so all
+        # speech audio has already been sent. The hard reset adds padding and
+        # uses keep_all_outputs=True to capture trailing words, then resets the
+        # decoder for the next turn.
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
+            self._waiting_for_final = True
+            # Report the standard TTFB metric as our finalization latency:
+            # start the clock now (when we ask the server to finalize). The base
+            # STTService stops it when our finalized=True TranscriptionFrame is
+            # pushed downstream, so TTFB == hard-reset -> final-transcript. This
+            # overrides the base class's default speech-end start point.
+            await self.start_ttfb_metrics()
+            await self._send_reset(finalize=True)
+
+    async def _send_reset(self, finalize: bool = True):
+        """Send reset signal to trigger transcription.
+
+        Args:
+            finalize: If True (hard reset), server adds padding and uses
+                      keep_all_outputs=True to capture trailing words.
+                      If False (soft reset), server returns current text
+                      without forcing decoder output.
+
+        Acquires audio_send_lock to ensure any in-progress audio send completes
+        before the reset signal is sent.
+        """
+        if self._websocket and self._ready:
+            try:
+                async with self._audio_send_lock:
+                    await self._websocket.send(json.dumps({
+                        "type": "reset",
+                        "finalize": finalize
+                    }))
+                    # Log inside lock to get accurate byte count
+                    samples = self._audio_bytes_sent // 2
+                    duration_ms = (samples * 1000) // 16000
+                    reset_type = "hard" if finalize else "soft"
+                    logger.debug(f"{self} sent {reset_type} reset (audio: {duration_ms}ms)")
+                    if finalize:
+                        self._audio_bytes_sent = 0  # Only reset on hard reset
+            except Exception as e:
+                logger.error(f"{self} failed to send reset: {e}")
+
+    async def _connect(self):
+        """Connect to the NVIDIA ASR service."""
+        logger.debug(f"{self} connecting to {self._url}")
+        await self._connect_websocket()
+
+        # Start receive task
+        self._receive_task = asyncio.create_task(
+            self._receive_task_handler(self._report_error)
+        )
+
+        await self._call_event_handler("on_connected", self)
+
+    async def _disconnect(self):
+        """Disconnect from the NVIDIA ASR service."""
+        logger.debug(f"{self} disconnecting")
+
+        # Cancel receive task
+        if self._receive_task:
+            self._receive_task.cancel()
+            try:
+                await self._receive_task
+            except asyncio.CancelledError:
+                pass
+            self._receive_task = None
+
+        await self._disconnect_websocket()
+        await self._call_event_handler("on_disconnected", self)
+
+    async def _connect_websocket(self):
+        """Establish the websocket connection."""
+        try:
+            self._websocket = await websockets.connect(self._url)
+            self._ready = False
+
+            # Wait for ready message
+            try:
+                ready_msg = await asyncio.wait_for(self._websocket.recv(), timeout=5.0)
+                data = json.loads(ready_msg)
+                if data.get("type") == "ready":
+                    self._ready = True
+                    logger.info(f"{self} connected and ready")
+                else:
+                    logger.warning(f"{self} unexpected initial message: {data}")
+                    self._ready = True  # Proceed anyway
+            except TimeoutError:
+                logger.warning(f"{self} timeout waiting for ready message, proceeding anyway")
+                self._ready = True
+
+            self._committed_tokens = []
+
+        except Exception as e:
+            logger.error(f"{self} connection failed: {e}")
+            await self._report_error(ErrorFrame(f"Connection failed: {e}"))
+            raise
+
+    async def _disconnect_websocket(self):
+        """Close the websocket connection."""
+        self._ready = False
+        self._committed_tokens = []
+        if self._websocket:
+            try:
+                await self._websocket.close()
+            except Exception as e:
+                logger.debug(f"{self} error closing websocket: {e}")
+            finally:
+                self._websocket = None
+
+    async def _receive_messages(self):
+        """Receive and process websocket messages from NVIDIA ASR server."""
+        if not self._websocket:
+            return
+
+        async for message in self._websocket:
+            try:
+                data = json.loads(message)
+                msg_type = data.get("type")
+
+                if msg_type == "transcript":
+                    await self._handle_transcript(data)
+                elif msg_type == "error":
+                    error_msg = data.get("message", "Unknown error")
+                    logger.error(f"{self} server error: {error_msg}")
+                    await self._report_error(ErrorFrame(f"Server error: {error_msg}"))
+                elif msg_type == "ready":
+                    # Server might send another ready message after reset
+                    self._ready = True
+                    logger.debug(f"{self} server ready")
+                else:
+                    logger.debug(f"{self} unknown message type: {msg_type}")
+
+            except json.JSONDecodeError as e:
+                logger.error(f"{self} invalid JSON: {e}")
+            except Exception as e:
+                logger.error(f"{self} error processing message: {e}")
+
+    async def _handle_transcript(self, data: dict):
+        """Handle a transcript message from the server.
+
+        Final transcripts from HARD resets (finalize=True) are emitted as
+        ``finalized=True`` ``TranscriptionFrame``s so a downstream turn-analyzer
+        stop strategy can end the user turn immediately. SOFT-reset finals are
+        ignored here (only used for timing); interim results are emitted as
+        ``InterimTranscriptionFrame``s.
+
+        Args:
+            data: The transcript message data.
+        """
+        text = data.get("text", "")
+        is_final = data.get("is_final", False)
+        is_hard_reset = data.get("finalize", True)  # Default True for backward compat
+
+        if not text:
+            # A hard reset that came back empty still ends the finalization wait.
+            if is_final and is_hard_reset:
+                self._waiting_for_final = False
+            return
+
+        timestamp = time_now_iso8601()
+
+        if is_final:
+            # Only emit TranscriptionFrames from HARD reset responses.
+            # Soft reset returns partial/stable text quickly but may have incomplete
+            # words (e.g., "shipp" instead of "shipping"). Hard reset adds padding
+            # and uses keep_all_outputs=True to get complete words.
+
+            reset_type = "hard" if is_hard_reset else "soft"
+            logger.debug(f"{self} {reset_type} final at {time.time():.3f}: {text[-50:] if len(text) > 50 else text}")
+
+            if is_hard_reset:
+                # Server handles deduplication - it sends only the delta (new portion)
+                # so we emit directly without client-side deduplication.
+                # finalized=True lets TurnAnalyzerUserTurnStopStrategy end the user
+                # turn immediately, and makes the base STTService report TTFB (our
+                # finalization latency, started on the hard reset) on this frame.
+                await self.push_frame(
+                    TranscriptionFrame(
+                        text,
+                        self._user_id,
+                        timestamp,
+                        language=None,
+                        finalized=True,
+                    )
+                )
+                self._waiting_for_final = False
+                self._committed_tokens.extend(text.split())
+        else:
+            logger.trace(f"{self} interim: {text[:30]}...")
+            if not self._strip_interim_prefix:
+                await self.push_frame(
+                    InterimTranscriptionFrame(
+                        text,
+                        self._user_id,
+                        timestamp,
+                        language=None,
+                    )
+                )
+                return
+
+            stripped = _strip_committed_prefix(text, self._committed_tokens)
+            if stripped is None:
+                logger.debug(
+                    f"{self} interim prefix mismatch; committed prefix sample: "
+                    f"{' '.join(self._committed_tokens[:8])}"
+                )
+                stripped = text
+            elif stripped == "":
+                return
+
+            await self.push_frame(
+                InterimTranscriptionFrame(
+                    stripped,
+                    self._user_id,
+                    timestamp,
+                    language=None,
+                )
+            )

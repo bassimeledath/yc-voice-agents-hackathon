@@ -91,7 +91,7 @@ File under change: `/home/khkramer/src/yc-voice-agents-hackathon/server/nvidia_s
   **Decision checkpoint:** if (b) shows `end`-at-vad_stop cold-resets AND its next-turn-readiness latency is not materially worse than `reset` (judge against the user-visible turn latency budget, not an arbitrary fixed ms), STOP and recommend the simpler one-line approach (send `end` on `VADUserStoppedSpeaking`, drop Part 1 entirely) to the user before continuing. If `CUMULATIVE_INTERIMS_CONFIRMED` is false, Part 1 is unnecessary regardless — record and skip it. Otherwise proceed with Part 1 + Part 2.
   Key files: `proj-2026-05-26-1816/probe_nemotron.py`
 
-- [ ] **2. Part 1 — best-effort interim prefix-strip (committed accumulator), CONDITIONAL on Step 1**
+- [x] **2. Part 1 — best-effort interim prefix-strip (committed accumulator), CONDITIONAL on Step 1**
   Only do the stripping if Step 1 set `CUMULATIVE_INTERIMS_CONFIRMED=true` (and the `end` checkpoint did not supersede Part 1). If false, skip this step (interims pass through unchanged) and record why.
   - `__init__`: add `self._committed_tokens: list[str] = []` (so it always exists, even before connect; reconnect resets happen in the websocket methods).
   - Add a concrete constructor arg `strip_interim_prefix: bool = True` → `self._strip_interim_prefix`. **Set it EXPLICITLY at the `NVidiaWebSocketSTTService(...)` instantiation in `server/bot-wip.py` based on the Step 1 result** (don't rely on the default): `strip_interim_prefix=True` iff Step 1 confirmed continuous cumulative interims, else `False`. The default `True` is only a fallback; the footgun (false-stripping a repeated current-turn opening in default mode) is contained by the explicit wiring + the mismatch→passthrough fallback + the Step 6(a) live check.
@@ -134,8 +134,8 @@ File under change: `/home/khkramer/src/yc-voice-agents-hackathon/server/nvidia_s
 ## Progress
 | # | Step | Status | Commit | Notes |
 |---|------|--------|--------|-------|
-| 1 | Probe: mode/semantics/end-vs-reset/keepalive (decision checkpoint) | done | — | CUMULATIVE=True→Part1 on; keepalive ok; end test inconclusive→proceed |
-| 2 | Part 1 — best-effort interim prefix-strip | pending | — | |
+| 1 | Probe: mode/semantics/end-vs-reset/keepalive (decision checkpoint) | done | 342d8b5 | CUMULATIVE=True→Part1 on; keepalive ok; end test inconclusive→proceed |
+| 2 | Part 1 — best-effort interim prefix-strip | done | — | append-only committed tokens; None→fallback+log, ""→skip; wired strip_interim_prefix=True; lint+F401+import clean |
 | 3 | Part 2 — VAD-gated audio with pre-roll | pending | — | |
 | 4 | Explicit WS keepalive ping params | pending | — | |
 | 5 | Offline tests + lint + import check | pending | — | |

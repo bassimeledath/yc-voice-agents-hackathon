@@ -47,8 +47,6 @@ from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.services.gradium.tts import GradiumTTSService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService
-from pipecat.services.soniox.stt import SonioxContextObject, SonioxSTTService
-from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
@@ -56,6 +54,7 @@ from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams, FastAPI
 from pipecat.turns.user_turn_strategies import FilterIncompleteUserTurnStrategies
 
 from mock_backend import BOUQUETS, KNOWN_CUSTOMERS
+from nvidia_stt import NVidiaWebSocketSTTService
 
 load_dotenv(override=True)
 
@@ -348,13 +347,14 @@ async def run_bot(
     )
 
     # Speech-to-Text service
-    stt = SonioxSTTService(
-        api_key=os.environ["SONIOX_API_KEY"],
-        settings=SonioxSTTService.Settings(
-            language_hints=[Language.EN],
-            language_hints_strict=True,
-            context=SonioxContextObject(terms=["bouquet"]),
-        ),
+    #
+    # Nemotron Speech Streaming STT, served over WebSocket. The server expects
+    # 16-bit PCM, 16 kHz, mono — matching the WebRTC input path. The URL can be
+    # overridden via NVIDIA_ASR_URL.
+    stt = NVidiaWebSocketSTTService(
+        url=os.getenv("NVIDIA_ASR_URL", "ws://192.168.7.228:8081"),
+        sample_rate=16000,
+        strip_interim_prefix=True,
     )
 
     # LLM service
