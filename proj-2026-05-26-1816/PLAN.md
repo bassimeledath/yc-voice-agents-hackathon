@@ -72,7 +72,8 @@ File under change: `/home/khkramer/src/yc-voice-agents-hackathon/server/nvidia_s
 
 ### Concurrency (narrow, accurate invariant)
 - `InputAudioRawFrame` and VAD frames are **system frames**, processed immediately and serially within this processor (`frame_processor.py:999`), so `_user_speaking` / `_audio_ring` need no extra lock. VAD runs in the **downstream aggregator** and broadcasts `VADUserStartedSpeakingFrame` **UPSTREAM** to STT (`llm_response_universal.py:862`); by the time it reaches STT the onset audio has already passed through STT and been buffered in `_audio_ring`, so the flush-on-start captures it (pre-roll covers the round-trip).
-- The WS **receive task** is a SEPARATE task that mutates `_committed_tokens` via `_handle_transcript`. **`cancel()` MUST cancel/await `_receive_task` BEFORE its manual `recv()` drain** — otherwise two coroutines call `recv()` on the same websocket (which raises) AND race on `_committed_tokens`. Guard WS sends with the existing `_audio_send_lock`.
+- The WS **receive task** is a SEPARATE task. In steady state it mutates only `_committed_tokens` via `_handle_transcript`. **`cancel()` MUST cancel/await `_receive_task` BEFORE its manual `recv()` drain** — otherwise two coroutines call `recv()` on the same websocket (which raises) AND race on `_committed_tokens`. Guard WS sends with the existing `_audio_send_lock`.
+- **Reconnect caveat (accepted):** auto-reconnect (`WebsocketSTTService._reconnect_websocket`) calls `_disconnect_websocket()`/`_connect_websocket()` from the receive task, and those reset the Part 2 session state (`_user_speaking`/`_audio_ring`/`_audio_bytes_sent`) too — so during a reconnect the receive task and the process task (audio/VAD frames) can both touch that state. asyncio is single-threaded (no torn writes), and the only observable effect is the already-accepted "reconnect spanning a speech segment may be lost." Not guarded further by design.
 
 ### Validation
 - `uv run ruff check nvidia_stt.py` (rules `I`,`UP`) and `uv run python -c "import nvidia_stt"` must pass. Python 3.12 via `uv`.
@@ -101,7 +102,7 @@ File under change: `/home/khkramer/src/yc-voice-agents-hackathon/server/nvidia_s
   - Reset `self._committed_tokens = []` in `_connect_websocket` (after `ready`) and `_disconnect_websocket`. NOT on `UserStartedSpeakingFrame`.
   Key files: `server/nvidia_stt.py`, `server/bot-wip.py` (single-line `strip_interim_prefix=` wiring iff Step 1 found non-cumulative interims)
 
-- [ ] **3. Part 2 — VAD-gated audio with pre-roll ring buffer**
+- [x] **3. Part 2 — VAD-gated audio with pre-roll ring buffer**
   - Imports: add `AudioRawFrame`, `VADUserStartedSpeakingFrame`. Also remove now-unused imports while here: `Optional` (`nvidia_stt.py:13`, no longer referenced after the earlier `X | None` modernization) and `ConnectionClosedError`/`ConnectionClosedOK` (`nvidia_stt.py:31`, unused). NOTE: ruff `select=["I","UP"]` does NOT include F401, so unused imports are NOT auto-flagged — remove them by hand (optionally run `ruff check --select F401` as a one-off check).
   - `__init__`: add `preroll_seconds: float = 1.0` (store `self._preroll_seconds`); init ALL new fields here so early frames can't `AttributeError`: `self._user_speaking = False`, `self._audio_ring = bytearray()`, `self._preroll_bytes = 0`. In `start()` (after `super().start`): set `self._preroll_bytes = int(self.sample_rate * self._preroll_seconds) * 2`.
   - Override `process_audio_frame(self, frame: AudioRawFrame, direction)`: replicate base safety FIRST — reconnect-buffer (`if self._reconnecting: self._reconnect_audio_buffer.append((frame, direction)); return`), mute (`if self._muted: return`), set `_user_id` from frame, `self._last_audio_time = time.monotonic()`, empty guard. Then gate: if `self._user_speaking` → `await self.process_generator(self.run_stt(frame.audio))`; else append to `self._audio_ring` and trim to last `self._preroll_bytes` (if `_preroll_bytes` still 0, don't trim yet).
@@ -135,8 +136,8 @@ File under change: `/home/khkramer/src/yc-voice-agents-hackathon/server/nvidia_s
 | # | Step | Status | Commit | Notes |
 |---|------|--------|--------|-------|
 | 1 | Probe: mode/semantics/end-vs-reset/keepalive (decision checkpoint) | done | 342d8b5 | CUMULATIVE=True→Part1 on; keepalive ok; end test inconclusive→proceed |
-| 2 | Part 1 — best-effort interim prefix-strip | done | — | append-only committed tokens; None→fallback+log, ""→skip; wired strip_interim_prefix=True; lint+F401+import clean |
-| 3 | Part 2 — VAD-gated audio with pre-roll | pending | — | |
+| 2 | Part 1 — best-effort interim prefix-strip | done | 2483a38 | append-only committed tokens; None→fallback+log, ""→skip; wired strip_interim_prefix=True; lint+F401+import clean |
+| 3 | Part 2 — VAD-gated audio with pre-roll | done | — | gated socket sends; pre-roll flush; matched/unmatched VAD-stop; reconnect resets; cancel race fixed. Paired review (Codex b2lm409p7 + Opus): SOUND |
 | 4 | Explicit WS keepalive ping params | pending | — | |
 | 5 | Offline tests + lint + import check | pending | — | |
 | 6 | Live multi-turn smoke test | pending | — | |

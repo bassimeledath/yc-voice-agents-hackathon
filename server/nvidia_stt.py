@@ -14,6 +14,7 @@ from collections.abc import AsyncGenerator
 import websockets
 from loguru import logger
 from pipecat.frames.frames import (
+    AudioRawFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
@@ -22,6 +23,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -66,6 +68,7 @@ class NVidiaWebSocketSTTService(WebsocketSTTService):
         url: str = "ws://localhost:8080",
         sample_rate: int = 16000,
         strip_interim_prefix: bool = True,
+        preroll_seconds: float = 1.0,
         **kwargs,
     ):
         """Initialize the NVIDIA STT service.
@@ -74,18 +77,23 @@ class NVidiaWebSocketSTTService(WebsocketSTTService):
             url: WebSocket URL of the NVIDIA ASR server.
             sample_rate: Audio sample rate (must be 16000 for Parakeet).
             strip_interim_prefix: Strip already-finalized tokens from cumulative interims.
+            preroll_seconds: Audio buffered before VAD start so speech onsets are preserved.
             **kwargs: Additional arguments passed to the parent WebsocketSTTService.
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
         self._url = url
         self._strip_interim_prefix = strip_interim_prefix
+        self._preroll_seconds = preroll_seconds
         self._websocket = None
         self._receive_task: asyncio.Task | None = None
         self._ready = False
         self._committed_tokens: list[str] = []
+        self._user_speaking = False
+        self._audio_ring = bytearray()
+        self._preroll_bytes = 0
         # Lock to ensure any in-progress audio send completes before reset
         self._audio_send_lock = asyncio.Lock()
-        # Diagnostic: track audio bytes sent since last reset
+        # Functional: unmatched VAD-stop guard reads bytes sent since last reset.
         self._audio_bytes_sent = 0
 
         # Set when we send the finalization (hard) reset on VAD silence, and
@@ -103,6 +111,7 @@ class NVidiaWebSocketSTTService(WebsocketSTTService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
+        self._preroll_bytes = int(self.sample_rate * self._preroll_seconds) * 2
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -111,6 +120,9 @@ class NVidiaWebSocketSTTService(WebsocketSTTService):
         Args:
             frame: The end frame.
         """
+        # Discard pre-VAD audio; session-end finalization is best-effort because
+        # stop disconnects without waiting for the final transcript.
+        self._audio_ring.clear()
         # Send HARD reset to ensure any buffered audio is transcribed
         await self._send_reset(finalize=True)
         await super().stop(frame)
@@ -122,10 +134,23 @@ class NVidiaWebSocketSTTService(WebsocketSTTService):
         Args:
             frame: The cancel frame.
         """
-        self._waiting_for_final = False
+        # Stop the receive task first so the bounded manual drain below is the
+        # only coroutine reading from the websocket.
+        if self._receive_task:
+            self._receive_task.cancel()
+            try:
+                await self._receive_task
+            except asyncio.CancelledError:
+                pass
+            self._receive_task = None
+
+        # Discard pre-VAD audio; live speech has already been streamed.
+        self._audio_ring.clear()
+
         # Send HARD reset to capture any remaining buffered audio
         # This ensures words at the end of audio aren't lost when pipeline is cancelled
         await self._send_reset(finalize=True)
+
         # Wait briefly for server to process the reset and send response
         # Without this, we disconnect before receiving the final transcript
         if self._websocket and self._ready:
@@ -151,12 +176,45 @@ class NVidiaWebSocketSTTService(WebsocketSTTService):
         if self._websocket and self._ready:
             try:
                 async with self._audio_send_lock:
-                    self._audio_bytes_sent += len(audio)
                     await self._websocket.send(audio)
+                    self._audio_bytes_sent += len(audio)
             except Exception as e:
                 logger.error(f"{self} failed to send audio: {e}")
                 await self._report_error(ErrorFrame(f"Failed to send audio: {e}"))
         yield None
+
+    async def process_audio_frame(self, frame: AudioRawFrame, direction: FrameDirection):
+        """Gate websocket audio sends on VAD while preserving audio passthrough."""
+        if self._reconnecting:
+            self._reconnect_audio_buffer.append((frame, direction))
+            return
+
+        if self._muted:
+            return
+
+        # UserAudioRawFrame contains a user_id (e.g. Daily, Livekit)
+        if hasattr(frame, "user_id"):
+            self._user_id = frame.user_id
+        # AudioRawFrame does not have a user_id (e.g. SmallWebRTCTransport, websockets)
+        else:
+            self._user_id = ""
+
+        self._last_audio_time = time.monotonic()
+
+        if not frame.audio:
+            # Ignoring in case we don't have audio to transcribe.
+            logger.warning(
+                f"Empty audio frame received for STT service: {self.name} {frame.num_frames}"
+            )
+            return
+
+        if self._user_speaking:
+            await self.process_generator(self.run_stt(frame.audio))
+            return
+
+        self._audio_ring += frame.audio
+        if self._preroll_bytes > 0 and len(self._audio_ring) > self._preroll_bytes:
+            del self._audio_ring[:-self._preroll_bytes]
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames, finalizing the utterance on VAD end-of-speech.
@@ -178,15 +236,27 @@ class NVidiaWebSocketSTTService(WebsocketSTTService):
             await super().process_frame(frame, direction)
             return
 
-        # All frames pass through normally (in particular VADUserStoppedSpeaking
-        # must reach the turn analyzer before our final transcript does).
-        await super().process_frame(frame, direction)
+        if isinstance(frame, VADUserStartedSpeakingFrame):
+            if self._audio_ring:
+                await self.process_generator(self.run_stt(bytes(self._audio_ring)))
+            self._audio_ring.clear()
+            self._user_speaking = True
+            await super().process_frame(frame, direction)
+            return
 
-        # Finalize on VAD silence. VAD fires after ~200ms of silence, so all
-        # speech audio has already been sent. The hard reset adds padding and
-        # uses keep_all_outputs=True to capture trailing words, then resets the
-        # decoder for the next turn.
         if isinstance(frame, VADUserStoppedSpeakingFrame):
+            audio_was_streamed = self._audio_bytes_sent > 0
+            self._user_speaking = False
+
+            if not audio_was_streamed:
+                self._audio_ring.clear()
+                logger.debug(f"{self} ignoring unmatched VAD stop; no audio streamed")
+                await self.push_frame(frame, direction)
+                return
+
+            # VAD stop must reach the turn analyzer before our final transcript
+            # does; base STTService also starts its speech-end TTFB window here.
+            await super().process_frame(frame, direction)
             self._waiting_for_final = True
             # Report the standard TTFB metric as our finalization latency:
             # start the clock now (when we ask the server to finalize). The base
@@ -195,6 +265,10 @@ class NVidiaWebSocketSTTService(WebsocketSTTService):
             # overrides the base class's default speech-end start point.
             await self.start_ttfb_metrics()
             await self._send_reset(finalize=True)
+            return
+
+        # All other frames pass through normally.
+        await super().process_frame(frame, direction)
 
     async def _send_reset(self, finalize: bool = True):
         """Send reset signal to trigger transcription.
@@ -274,6 +348,9 @@ class NVidiaWebSocketSTTService(WebsocketSTTService):
                 self._ready = True
 
             self._committed_tokens = []
+            self._user_speaking = False
+            self._audio_ring.clear()
+            self._audio_bytes_sent = 0
 
         except Exception as e:
             logger.error(f"{self} connection failed: {e}")
@@ -284,6 +361,9 @@ class NVidiaWebSocketSTTService(WebsocketSTTService):
         """Close the websocket connection."""
         self._ready = False
         self._committed_tokens = []
+        self._user_speaking = False
+        self._audio_ring.clear()
+        self._audio_bytes_sent = 0
         if self._websocket:
             try:
                 await self._websocket.close()
