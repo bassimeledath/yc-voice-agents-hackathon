@@ -205,7 +205,7 @@ Repo: [github.com/cekura-ai/cekura-skills](https://github.com/cekura-ai/cekura-s
 /cekura-report
 ```
 
-This spins up an evaluator, runs scenarios against your Pipecat agent, and gives you back a full report — transcripts, scores, and what failed — so you can iterate fast.
+This spins up anything from 10–20 evaluators (what Cekura calls test cases), runs scenarios against your Pipecat agent, and gives you back a full report — transcripts, scores, and what failed — so you can iterate fast.
 
 > When connecting your agent, **select `Pipecat` as the provider.** Details: [docs.cekura.ai → Pipecat](https://docs.cekura.ai/documentation/integrations/pipecat/automated).
 
