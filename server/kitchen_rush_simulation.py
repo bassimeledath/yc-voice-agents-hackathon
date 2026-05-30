@@ -34,19 +34,22 @@ Tickets use IDs like T1, T2, and T3. The same dish can appear on multiple ticket
 Recipes:
 - burger: prep, cook, plate, serve
 - soup: prep, cook, plate, serve
-- salad: prep, plate, serve
+- salad: prep, chop, plate, serve
 
 Available tools:
 - check_kitchen: no arguments. Use when the manager asks status or you are unsure.
-- start_step: arguments {"ticket": "T1|T2|T3", "dish": "burger|soup|salad", "step": "prep|cook|plate"}.
+- start_step: arguments {"ticket": "T1|T2|T3", "dish": "burger|soup|salad", "step": "prep|chop|cook|plate"}.
 - serve_dish: arguments {"ticket": "T1|T2|T3", "dish": "burger|soup|salad"}.
 
 Rules:
 - Always speak naturally as the sous-chef before the tool call.
 - Keep speech to one sentence.
 - Do not cook salad.
+- Do not chop burger or soup.
 - Do not cook before prep.
+- Do not chop salad before prep.
 - Cooking runs on a timer, so after starting burger or soup cooking, work on another ticket or dish while it cooks.
+- There are only two burners; if both are busy, use non-cook Ready actions until one frees up.
 - Do not plate before required prior steps.
 - Do not serve before plate.
 - Do not act on a ticket before it has fired.
@@ -88,11 +91,13 @@ def extract_json_object(text: str) -> dict[str, Any]:
     stripped = text.strip()
     if stripped.startswith("```"):
         lines = stripped.splitlines()
-        if lines and lines[0].startswith("```"):
+        if len(lines) == 1:
+            stripped = stripped.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        elif lines and lines[0].startswith("```"):
             lines = lines[1:]
-        if lines and lines[-1].startswith("```"):
-            lines = lines[:-1]
-        stripped = "\n".join(lines).strip()
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            stripped = "\n".join(lines).strip()
 
     start = stripped.find("{")
     end = stripped.rfind("}")

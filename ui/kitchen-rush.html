@@ -34,6 +34,10 @@
             <span class="result-pill" id="resultPill">Live</span>
           </div>
 
+          <div class="hud-burners" id="hudBurners">
+            <span class="burner-ico">🔥</span> Burners <b><span id="burnerCount">0</span>/2</b>
+          </div>
+
           <div class="ticket-rail" id="ticketRail"></div>
 
           <!-- manager call-out -->
@@ -42,10 +46,13 @@
             <span id="managerText"></span>
           </div>
 
+          <!-- two burner slots on the stove (markers built by JS) -->
+          <div class="burner-slots" id="burnerSlots"></div>
+
           <!-- station effect anchors (filled by JS) -->
           <div class="fx-layer" id="fxLayer"></div>
 
-          <!-- cooking pots live here, anchored to the stove -->
+          <!-- cooking pots live here, one per burner -->
           <div class="cook-layer" id="cookLayer"></div>
 
           <!-- the chef -->

@@ -64,19 +64,22 @@ Tickets use IDs like T1, T2, and T3. The same dish can appear on multiple ticket
 Recipes:
 - burger: prep, cook, plate, serve
 - soup: prep, cook, plate, serve
-- salad: prep, plate, serve
+- salad: prep, chop, plate, serve
 
 Available tools:
 - check_kitchen: inspect current ticket state and timers.
-- start_step: prep, cook, or plate a dish on a ticket.
+- start_step: prep, chop, cook, or plate a dish on a ticket.
 - serve_dish: serve a plated dish.
 
 Rules:
 - Speak one short sentence before or after each action.
 - Keep working even when the manager is quiet; a kitchen tick means take your next best action.
 - Do not cook salad.
+- Do not chop burger or soup.
 - Do not cook before prep.
+- Do not chop salad before prep.
 - Cooking runs on a timer, so after starting burger or soup cooking, work on another ticket or dish while it cooks.
+- There are only two burners; if both are busy, use non-cook Ready actions until one frees up.
 - Do not plate before required prior steps.
 - Do not serve before plate.
 - Do not act on a ticket before it has fired.
@@ -217,7 +220,7 @@ async def run_kitchen_bot(
         Args:
             ticket: Ticket ID, such as "T1", "T2", or "T3".
             dish: One of "burger", "soup", or "salad".
-            step: One of "prep", "cook", or "plate".
+            step: One of "prep", "chop", "cook", or "plate".
         """
         async with tool_lock:
             result = game.start_step(ticket, dish, step)

@@ -15,10 +15,17 @@ const STATIONS = {
 };
 const TOP_STATIONS = new Set(["prep", "cook", "plate"]);
 
-const RECIPES = { burger: ["prep", "cook", "plate"], soup: ["prep", "cook", "plate"], salad: ["prep", "plate"] };
+// the stove has exactly two burners; active cooks occupy these slots
+const MAX_BURNERS = 2;
+const BURNER_SLOTS = [
+  { x: 45, y: 22 },
+  { x: 52.5, y: 22 },
+];
+
 const DISH_ICON = { burger: "🍔", soup: "🥣", salad: "🥗" };
-const VERB = { prep: "Prep", cook: "Cook", plate: "Plate" };
-const STATE_RANK = { untouched: 0, prepped: 1, cooking: 2, cooked: 3, plated: 4, served: 5 };
+const VERB = { prep: "Prep", chop: "Chop", cook: "Cook", plate: "Plate" };
+// chop is the salad analog of cook ("ready to plate"); both sit above prepped, below plated
+const STATE_RANK = { untouched: 0, prepped: 1, cooking: 2, chopped: 3, cooked: 3, plated: 4, served: 5 };
 
 const ASSETS = { idle: "./assets/chef-idle.png", back: "./assets/chef-back.png" };
 const BASE_MS_PER_SEC = 150; // 1 game-second -> 150ms of playback at 1x
@@ -29,6 +36,9 @@ const stage = document.querySelector("#stage");
 const ticketRail = document.querySelector("#ticketRail");
 const cookLayer = document.querySelector("#cookLayer");
 const fxLayer = document.querySelector("#fxLayer");
+const hudBurners = document.querySelector("#hudBurners");
+const burnerCount = document.querySelector("#burnerCount");
+const burnerSlots = document.querySelector("#burnerSlots");
 const chef = document.querySelector("#chef");
 const chefSprite = document.querySelector("#chefSprite");
 const chefBubble = document.querySelector("#chefBubble");
@@ -68,6 +78,14 @@ let lastBubble = "";
 let lastManager = "";
 const ticketEls = {};
 const potEls = {};
+const burnerSlotEls = BURNER_SLOTS.map((pos) => {
+  const el = document.createElement("div");
+  el.className = "burner-slot";
+  el.style.left = `${pos.x}%`;
+  el.style.top = `${pos.y}%`;
+  burnerSlots.appendChild(el);
+  return el;
+});
 
 // ---- helpers ----
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -81,6 +99,17 @@ function firstSentence(msg) {
   return i >= 0 ? m.slice(0, i + 1) : m;
 }
 
+function humanizeReason(reason) {
+  const map = {
+    objective_not_completed: "Objective not completed",
+    time_limit_exceeded: "Ran out of time",
+    sample_replay: "Shift over",
+  };
+  if (!reason) return "Shift over";
+  if (map[reason]) return map[reason];
+  return cap(String(reason).replace(/_/g, " "));
+}
+
 function readyAtFromMessage(msg) {
   const m = String(msg || "").match(/ready at (\d+)\s*s/i);
   return m ? Number(m[1]) : null;
@@ -90,7 +119,11 @@ function stationForTool(tool) {
   const name = tool && tool.name;
   if (name === "serve_dish") return "serve";
   if (name === "check_kitchen") return "check";
-  if (name === "start_step") return (tool.arguments && tool.arguments.step) || "prep";
+  if (name === "start_step") {
+    const step = tool.arguments && tool.arguments.step;
+    // chopping happens at the prep board, not the stove
+    return step === "chop" ? "prep" : step || "prep";
+  }
   return "center";
 }
 
@@ -182,6 +215,7 @@ function computeStateAt(time) {
     const id = d.ticket && d.dish ? itemId(d.ticket, d.dish) : null;
     if (e.type === "start_step") {
       if (d.step === "cook") setState(id, "cooking");
+      else if (d.step === "chop") setState(id, "chopped");
       else if (d.step === "plate") setState(id, "plated");
       else if (d.step === "prep") setState(id, "prepped");
     } else if (e.type === "cook_complete") setState(id, "cooked");
@@ -317,28 +351,43 @@ function render(s) {
     lastManager = "";
   }
 
-  // cooking pots
-  const live = new Set();
+  // cooking pots — each active cook occupies one of the two burner slots.
+  // Free finished burners first so slot assignment + markers reflect the live set.
+  const liveIds = new Set(s.cooking.map((c) => c.id));
+  for (const id of Object.keys(potEls)) {
+    if (!liveIds.has(id)) {
+      potEls[id].remove();
+      delete potEls[id];
+    }
+  }
+  const occupied = new Set(Object.values(potEls).map((p) => Number(p.dataset.slot)));
   s.cooking.forEach((c) => {
-    live.add(c.id);
     let pot = potEls[c.id];
     if (!pot) {
-      const slot = Object.keys(potEls).length;
+      let slot = 0;
+      while (slot < BURNER_SLOTS.length - 1 && occupied.has(slot)) slot += 1;
+      occupied.add(slot);
+      const pos = BURNER_SLOTS[slot] || BURNER_SLOTS[0];
       pot = document.createElement("div");
       pot.className = "pot";
-      pot.innerHTML = `<span class="steam">♨</span><span class="pot-ico">${c.dish === "soup" ? "🍲" : "🍳"}</span>`;
-      pot.style.left = `${45 + slot * 8}%`;
-      pot.style.top = "21%";
+      pot.dataset.slot = String(slot);
+      pot.innerHTML = `<span class="steam">♨</span><span class="pot-ico">${c.dish === "soup" ? "🍲" : "🍳"}</span><span class="pot-sec"></span>`;
+      pot.style.left = `${pos.x}%`;
+      pot.style.top = `${pos.y}%`;
       cookLayer.appendChild(pot);
       potEls[c.id] = pot;
     }
     pot.style.setProperty("--p", Math.round(c.progress * 100));
+    const sec = pot.querySelector(".pot-sec");
+    if (sec) sec.textContent = `${Math.max(0, Math.ceil(c.ready - s.t))}s`;
   });
-  for (const id of Object.keys(potEls)) {
-    if (!live.has(id)) {
-      potEls[id].remove();
-      delete potEls[id];
-    }
+
+  // burner-capacity HUD + slot markers, from the final live set
+  burnerCount.textContent = String(s.cooking.length);
+  hudBurners.classList.toggle("full", s.cooking.length >= MAX_BURNERS);
+  const liveSlots = new Set(Object.values(potEls).map((p) => Number(p.dataset.slot)));
+  for (let i = 0; i < burnerSlotEls.length; i += 1) {
+    burnerSlotEls[i].classList.toggle("busy", liveSlots.has(i));
   }
 
   // action line
@@ -347,7 +396,9 @@ function render(s) {
     actionResult.textContent = s.action.result;
   } else if (s.finished) {
     actionName.textContent = "Done";
-    actionResult.textContent = parsed.won ? "Shift complete — all tickets served!" : parsed.lossReason || "Shift over.";
+    actionResult.textContent = parsed.won
+      ? "Shift complete — all tickets served!"
+      : humanizeReason(parsed.lossReason);
   } else {
     actionName.textContent = "Ready";
     actionResult.textContent = "Waiting for service…";
@@ -379,8 +430,8 @@ function showVerdict() {
   verdictSub.textContent = parsed.won
     ? `${titleCase(parsed.scenario)} · ${parsed.finalElapsed}s`
     : parsed.missedList.length
-      ? `Missed: ${parsed.missedList.join(", ")}`
-      : parsed.lossReason || "Objective not completed";
+      ? `Missed deadline: ${parsed.missedList.join(", ")}`
+      : humanizeReason(parsed.lossReason);
 }
 function hideVerdict() {
   verdict.hidden = true;
@@ -424,7 +475,8 @@ function fireEventFx(e) {
       fxAt(S.door.x, S.door.y - 8, "🧾 ORDER!", "burst");
       break;
     case "start_step":
-      if (d.step === "prep") fxAt(S.prep.fx.x, S.prep.fx.y, "🔪", "float");
+      if (d.step === "prep") fxAt(S.prep.fx.x, S.prep.fx.y, "🥕", "float");
+      else if (d.step === "chop") fxAt(S.prep.fx.x, S.prep.fx.y, "🔪", "burst");
       else if (d.step === "cook") fxAt(S.cook.fx.x, S.cook.fx.y, "🔥", "burst");
       else if (d.step === "plate") fxAt(S.plate.fx.x, S.plate.fx.y, "✨", "float");
       break;

@@ -6,16 +6,17 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 Dish = Literal["burger", "soup", "salad"]
-Step = Literal["prep", "cook", "plate"]
+Step = Literal["prep", "chop", "cook", "plate"]
 
 RECIPES: dict[Dish, list[Step]] = {
     "burger": ["prep", "cook", "plate"],
     "soup": ["prep", "cook", "plate"],
-    "salad": ["prep", "plate"],
+    "salad": ["prep", "chop", "plate"],
 }
 
 STEP_SECONDS: dict[Step, int] = {
     "prep": 8,
+    "chop": 4,
     "cook": 15,
     "plate": 5,
 }
@@ -23,6 +24,7 @@ STEP_SECONDS: dict[Step, int] = {
 CHECK_SECONDS = 2
 SERVE_SECONDS = 3
 MISTAKE_SECONDS = 5
+MAX_ACTIVE_COOKS = 2
 
 
 @dataclass(frozen=True)
@@ -55,14 +57,14 @@ DEFAULT_TICKETS: tuple[KitchenTicket, ...] = (
         id="T2",
         dishes=("burger", "soup"),
         arrival_sec=12,
-        deadline_sec=88,
+        deadline_sec=100,
         priority="burger",
     ),
     KitchenTicket(
         id="T3",
         dishes=("salad",),
         arrival_sec=30,
-        deadline_sec=90,
+        deadline_sec=104,
         priority=None,
     ),
 )
@@ -71,7 +73,7 @@ DEFAULT_TICKETS: tuple[KitchenTicket, ...] = (
 @dataclass
 class KitchenRushGame:
     tickets: tuple[KitchenTicket, ...] = DEFAULT_TICKETS
-    max_seconds: int = 90
+    max_seconds: int = 105
     elapsed_sec: int = 0
     steps: dict[str, dict[Step, bool]] = field(default_factory=dict)
     served: dict[str, bool] = field(default_factory=dict)
@@ -89,7 +91,12 @@ class KitchenRushGame:
 
     def __post_init__(self) -> None:
         self.steps = {
-            self.item_id(ticket.id, dish): {"prep": False, "cook": False, "plate": False}
+            self.item_id(ticket.id, dish): {
+                "prep": False,
+                "chop": False,
+                "cook": False,
+                "plate": False,
+            }
             for ticket in self.tickets
             for dish in ticket.dishes
         }
@@ -122,7 +129,7 @@ class KitchenRushGame:
         validation_error = self._validate_item(normalized_ticket, normalized_dish)
         if validation_error:
             return self._mistake(validation_error, end_game="not on any ticket" in validation_error)
-        if normalized_step not in ("prep", "cook", "plate"):
+        if normalized_step not in ("prep", "chop", "cook", "plate"):
             return self._mistake(f"Unknown step: {step}")
 
         recipe = RECIPES[normalized_dish]  # type: ignore[index]
@@ -136,6 +143,11 @@ class KitchenRushGame:
             )
         if normalized_step == "cook" and item in self.active_cooks:
             return self._unnecessary(f"{normalized_ticket} {normalized_dish} is already cooking.")
+        if normalized_step == "cook" and len(self.active_cooks) >= MAX_ACTIVE_COOKS:
+            return self._mistake(
+                f"No burner available for {normalized_ticket} {normalized_dish}; "
+                f"{len(self.active_cooks)}/{MAX_ACTIVE_COOKS} burners are busy."
+            )
 
         required_before = recipe[: recipe.index(normalized_step)]  # type: ignore[arg-type]
         missing = [prior for prior in required_before if not self.steps[item][prior]]
@@ -225,16 +237,20 @@ class KitchenRushGame:
                     status = f"cooking until {self.active_cooks[item]}s"
                 elif self.served[item]:
                     status = "served"
-                elif self.steps[item]["plate"]:
-                    status = "ready to serve"
-                elif "cook" in RECIPES[dish] and self.steps[item]["cook"]:
-                    status = "ready to plate"
-                elif self.steps[item]["prep"] and "cook" not in RECIPES[dish]:
-                    status = "ready to plate"
-                elif self.steps[item]["prep"]:
-                    status = "prepped"
                 else:
-                    status = "untouched"
+                    next_step = next((step for step in RECIPES[dish] if not self.steps[item][step]), None)
+                    if next_step is None:
+                        status = "ready to serve"
+                    elif next_step == "prep":
+                        status = "untouched"
+                    elif next_step == "chop":
+                        status = "prepped"
+                    elif next_step == "cook":
+                        status = "prepped"
+                    elif next_step == "plate":
+                        status = "ready to plate"
+                    else:
+                        status = f"ready for {next_step}"
                 dish_summaries.append(f"{dish}: {status}")
             priority = f", priority {ticket.priority}" if ticket.priority else ""
             ticket_summaries.append(
@@ -243,6 +259,7 @@ class KitchenRushGame:
         return (
             f"{self.elapsed_sec}s elapsed. "
             f"{' | '.join(ticket_summaries)}. "
+            f"Burners: {len(self.active_cooks)}/{MAX_ACTIVE_COOKS} busy. "
             f"Mistakes: {len(self.mistakes)}. "
             f"Ready actions: {self.ready_actions_summary()}."
         )
@@ -260,16 +277,13 @@ class KitchenRushGame:
                 item = self.item_id(ticket.id, dish)
                 if self.served[item] or item in self.active_cooks:
                     continue
-                if not self.steps[item]["prep"]:
-                    ready_actions.append(f"start_step({ticket.id},{dish},prep)")
+                next_step = next((step for step in RECIPES[dish] if not self.steps[item][step]), None)
+                if next_step == "cook" and len(self.active_cooks) >= MAX_ACTIVE_COOKS:
                     continue
-                if "cook" in RECIPES[dish] and not self.steps[item]["cook"]:
-                    ready_actions.append(f"start_step({ticket.id},{dish},cook)")
-                    continue
-                if not self.steps[item]["plate"]:
-                    ready_actions.append(f"start_step({ticket.id},{dish},plate)")
-                    continue
-                ready_actions.append(f"serve_dish({ticket.id},{dish})")
+                if next_step:
+                    ready_actions.append(f"start_step({ticket.id},{dish},{next_step})")
+                else:
+                    ready_actions.append(f"serve_dish({ticket.id},{dish})")
         return ready_actions
 
     def new_ticket_messages(self, from_event_index: int) -> tuple[list[str], int]:
