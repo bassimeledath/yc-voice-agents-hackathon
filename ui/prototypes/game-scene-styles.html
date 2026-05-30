@@ -1,0 +1,731 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Voice Game Scene Style Prototypes</title>
+    <link rel="icon" href="data:," />
+    <style>
+      :root {
+        color-scheme: light;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #f4f1e8;
+        color: #202124;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at 8% 10%, rgba(255, 122, 89, 0.16), transparent 28rem),
+          radial-gradient(circle at 92% 0%, rgba(39, 174, 96, 0.14), transparent 25rem),
+          linear-gradient(135deg, #f8f4ea 0%, #e9f0ef 100%);
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      .page {
+        max-width: 1480px;
+        margin: 0 auto;
+        padding: 28px;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 20px;
+        margin-bottom: 18px;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: clamp(28px, 4vw, 56px);
+        line-height: 0.95;
+        letter-spacing: 0;
+      }
+
+      .subtitle {
+        max-width: 780px;
+        margin: 0;
+        color: #4b514f;
+        font-size: 16px;
+        line-height: 1.5;
+      }
+
+      .controls {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+
+      .control-button,
+      .file-label {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 38px;
+        padding: 0 14px;
+        border: 2px solid #202124;
+        border-radius: 8px;
+        color: #202124;
+        background: #fffaf0;
+        box-shadow: 3px 3px 0 #202124;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+
+      .control-button:active,
+      .file-label:active {
+        transform: translate(2px, 2px);
+        box-shadow: 1px 1px 0 #202124;
+      }
+
+      #transcriptFile {
+        position: absolute;
+        inline-size: 1px;
+        block-size: 1px;
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .status {
+        min-height: 18px;
+        margin: 0 0 18px;
+        color: #59605e;
+        font-size: 13px;
+      }
+
+      .styles-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px;
+      }
+
+      .style-panel {
+        --stage-bg: #ddebe3;
+        --ink: #202124;
+        --accent: #e84b3c;
+        --left-shirt: #2f6fed;
+        --right-shirt: #f2a531;
+        min-width: 0;
+      }
+
+      .panel-title {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 14px;
+        margin: 0 0 8px;
+      }
+
+      .panel-title h2 {
+        margin: 0;
+        font-size: 18px;
+        letter-spacing: 0;
+      }
+
+      .panel-title span {
+        color: #59605e;
+        font-size: 13px;
+      }
+
+      .scene {
+        position: relative;
+        overflow: hidden;
+        min-height: 460px;
+        border: 3px solid var(--ink);
+        border-radius: 8px;
+        background: var(--stage-bg);
+        box-shadow: 6px 6px 0 rgba(32, 33, 36, 0.9);
+      }
+
+      .stage {
+        position: relative;
+        min-height: 320px;
+      }
+
+      .scene-svg {
+        display: block;
+        inline-size: 100%;
+        block-size: 320px;
+      }
+
+      .speaker-label {
+        position: absolute;
+        top: 16px;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 138px;
+        padding: 8px 10px;
+        border: 2px solid var(--ink);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.86);
+        font-size: 13px;
+        font-weight: 800;
+        box-shadow: 3px 3px 0 var(--ink);
+      }
+
+      .speaker-label.left {
+        left: 16px;
+      }
+
+      .speaker-label.right {
+        right: 16px;
+        justify-content: flex-end;
+      }
+
+      .speaker-dot {
+        inline-size: 12px;
+        block-size: 12px;
+        border: 2px solid var(--ink);
+        border-radius: 50%;
+        background: #c5c8ca;
+      }
+
+      .speaking-left .speaker-label.left .speaker-dot,
+      .speaking-right .speaker-label.right .speaker-dot {
+        background: #20c56f;
+        animation: pulse-dot 700ms steps(2, end) infinite;
+      }
+
+      .dialogue {
+        position: absolute;
+        left: 16px;
+        right: 16px;
+        bottom: 16px;
+        min-height: 112px;
+        padding: 14px 18px 18px;
+        border: 3px solid var(--ink);
+        background: #fffaf0;
+        color: var(--ink);
+        box-shadow: 5px 5px 0 var(--ink);
+      }
+
+      .dialogue-name {
+        display: inline-flex;
+        align-items: center;
+        min-height: 28px;
+        margin-bottom: 8px;
+        padding: 0 10px;
+        border: 2px solid var(--ink);
+        border-radius: 6px;
+        background: var(--accent);
+        color: #fff;
+        font-size: 13px;
+        font-weight: 900;
+        text-transform: uppercase;
+      }
+
+      .dialogue-text {
+        min-height: 45px;
+        margin: 0;
+        font-size: clamp(17px, 2vw, 22px);
+        line-height: 1.35;
+        font-weight: 750;
+      }
+
+      .scene .mouth-open,
+      .scene .mouth-wide {
+        opacity: 0;
+      }
+
+      .speaking-left .avatar-left .mouth-closed,
+      .speaking-right .avatar-right .mouth-closed {
+        animation: hide-mouth 360ms steps(1, end) infinite;
+      }
+
+      .speaking-left .avatar-left .mouth-open,
+      .speaking-right .avatar-right .mouth-open {
+        animation: flap-open 360ms steps(1, end) infinite;
+      }
+
+      .speaking-left .avatar-left .mouth-wide,
+      .speaking-right .avatar-right .mouth-wide {
+        animation: flap-wide 360ms steps(1, end) infinite;
+      }
+
+      .avatar {
+        transform-box: fill-box;
+        transform-origin: center bottom;
+      }
+
+      .avatar-left,
+      .avatar-right {
+        animation: idle-bob 1600ms ease-in-out infinite;
+      }
+
+      .avatar-right {
+        animation-delay: -600ms;
+      }
+
+      .blink {
+        transform-box: fill-box;
+        transform-origin: center;
+        animation: blink 4200ms steps(1, end) infinite;
+      }
+
+      .pixel {
+        --stage-bg: #9fd2d0;
+        --accent: #d63c35;
+        --left-shirt: #214b9b;
+        --right-shirt: #efc84a;
+      }
+
+      .pixel .scene {
+        image-rendering: pixelated;
+        border-width: 4px;
+        box-shadow: 8px 8px 0 #1f2933;
+        background:
+          linear-gradient(#84c7d6 0 48%, transparent 48%),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.26) 0 10%, transparent 10% 20%),
+          #77b86a;
+      }
+
+      .pixel .dialogue,
+      .pixel .dialogue-name,
+      .pixel .speaker-label {
+        border-radius: 0;
+        box-shadow: 4px 4px 0 #1f2933;
+      }
+
+      .pixel .dialogue-text {
+        font-family: "Courier New", ui-monospace, monospace;
+        font-weight: 900;
+      }
+
+      .paper {
+        --stage-bg: #f2e7d0;
+        --accent: #2f7d5b;
+        --left-shirt: #316fa8;
+        --right-shirt: #df6b46;
+      }
+
+      .paper .scene {
+        background:
+          linear-gradient(135deg, rgba(255, 255, 255, 0.4), transparent 35%),
+          repeating-linear-gradient(0deg, rgba(88, 62, 43, 0.08) 0 1px, transparent 1px 7px),
+          #f2e7d0;
+      }
+
+      .paper .avatar {
+        filter: drop-shadow(3px 4px 0 rgba(45, 35, 25, 0.26));
+      }
+
+      .cutout {
+        --stage-bg: #b9dbe5;
+        --accent: #e24b39;
+        --left-shirt: #4c69c7;
+        --right-shirt: #47a06a;
+      }
+
+      .cutout .scene {
+        background:
+          linear-gradient(#a9d4eb 0 52%, #8dbb7b 52% 100%);
+      }
+
+      .cutout .avatar * {
+        stroke-linejoin: round;
+      }
+
+      .storybook {
+        --stage-bg: #202340;
+        --ink: #14151c;
+        --accent: #8f4fe8;
+        --left-shirt: #2f8bd2;
+        --right-shirt: #ffb84d;
+      }
+
+      .storybook .scene {
+        background:
+          radial-gradient(circle at 48% 22%, rgba(255, 232, 143, 0.38), transparent 120px),
+          linear-gradient(#1f2448 0 58%, #365f52 58% 100%);
+        color: #fff;
+      }
+
+      .storybook .dialogue {
+        background: #fff8df;
+      }
+
+      .storybook .speaker-label {
+        background: rgba(255, 248, 223, 0.9);
+      }
+
+      @keyframes idle-bob {
+        0%,
+        100% {
+          translate: 0 0;
+        }
+        50% {
+          translate: 0 -3px;
+        }
+      }
+
+      @keyframes blink {
+        0%,
+        92%,
+        100% {
+          transform: scaleY(1);
+        }
+        94% {
+          transform: scaleY(0.08);
+        }
+      }
+
+      @keyframes pulse-dot {
+        50% {
+          transform: scale(1.25);
+        }
+      }
+
+      @keyframes hide-mouth {
+        0%,
+        33%,
+        100% {
+          opacity: 0;
+        }
+        66% {
+          opacity: 1;
+        }
+      }
+
+      @keyframes flap-open {
+        0%,
+        33%,
+        100% {
+          opacity: 1;
+        }
+        66% {
+          opacity: 0;
+        }
+      }
+
+      @keyframes flap-wide {
+        0%,
+        66%,
+        100% {
+          opacity: 0;
+        }
+        33% {
+          opacity: 1;
+        }
+      }
+
+      @media (max-width: 920px) {
+        .page {
+          padding: 18px;
+        }
+
+        .topbar {
+          align-items: start;
+          flex-direction: column;
+        }
+
+        .controls {
+          justify-content: flex-start;
+        }
+
+        .styles-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .scene {
+          min-height: 430px;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation-duration: 0.001ms !important;
+          animation-iteration-count: 1 !important;
+          scroll-behavior: auto !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <section class="topbar" aria-labelledby="pageTitle">
+        <div>
+          <h1 id="pageTitle">Two-Speaker Game Scene Prototypes</h1>
+          <p class="subtitle">
+            Four reusable visual treatments for synthetic voice games. Each panel uses the same
+            dialogue data and role mapping, so the chosen style can become one component for every
+            interviewer/interviewee game.
+          </p>
+        </div>
+        <div class="controls" aria-label="Preview controls">
+          <button class="control-button" id="prevTurn" type="button">Prev</button>
+          <button class="control-button" id="playToggle" type="button">Pause</button>
+          <button class="control-button" id="nextTurn" type="button">Next</button>
+          <label class="file-label" for="transcriptFile">Load run JSON</label>
+          <input id="transcriptFile" type="file" accept="application/json,.json" />
+        </div>
+      </section>
+      <p class="status" id="statusText">Sample YC interview replay loaded.</p>
+
+      <section class="styles-grid" id="stylesGrid" aria-label="Style variants"></section>
+    </main>
+
+    <template id="sceneTemplate">
+      <article class="style-panel">
+        <div class="panel-title">
+          <h2></h2>
+          <span></span>
+        </div>
+        <section class="scene" aria-label="Animated game scene">
+          <div class="stage">
+            <div class="speaker-label left">
+              <span class="speaker-dot"></span>
+              <span data-left-label></span>
+            </div>
+            <div class="speaker-label right">
+              <span data-right-label></span>
+              <span class="speaker-dot"></span>
+            </div>
+            <svg class="scene-svg" viewBox="0 0 720 360" role="img" aria-label="Two people talking">
+              <defs>
+                <linearGradient id="deskGrad" x1="0" x2="1">
+                  <stop offset="0%" stop-color="#8b5d3d" />
+                  <stop offset="100%" stop-color="#b78153" />
+                </linearGradient>
+              </defs>
+              <g class="world">
+                <rect class="back-wall" x="0" y="0" width="720" height="360" fill="transparent" />
+                <rect x="70" y="82" width="230" height="118" rx="8" fill="rgba(255,255,255,.18)" />
+                <rect x="420" y="72" width="210" height="128" rx="8" fill="rgba(255,255,255,.14)" />
+                <path d="M0 245 C125 218 205 226 320 244 S555 270 720 232 V360 H0 Z" fill="rgba(0,0,0,.10)" />
+                <rect x="155" y="228" width="410" height="42" rx="6" fill="url(#deskGrad)" stroke="#202124" stroke-width="3" />
+                <rect x="245" y="196" width="122" height="72" rx="6" fill="#30343b" stroke="#202124" stroke-width="3" />
+                <rect x="257" y="208" width="98" height="48" rx="3" fill="#d6eef8" />
+                <rect x="372" y="210" width="94" height="58" rx="6" fill="#f3f4f4" stroke="#202124" stroke-width="3" />
+                <path d="M394 250 h50" stroke="#202124" stroke-width="4" stroke-linecap="round" />
+                <path d="M403 235 h32" stroke="#202124" stroke-width="4" stroke-linecap="round" />
+              </g>
+              <g class="avatar avatar-left" transform="translate(152 86)">
+                <path d="M57 158 C43 199 32 220 24 262 H155 C145 217 134 190 117 156 Z" fill="var(--left-shirt)" stroke="#202124" stroke-width="4" />
+                <path d="M50 160 C32 179 25 201 20 225" fill="none" stroke="#202124" stroke-width="10" stroke-linecap="round" />
+                <path d="M122 159 C143 176 152 199 158 222" fill="none" stroke="#202124" stroke-width="10" stroke-linecap="round" />
+                <circle cx="86" cy="86" r="64" fill="#f2bc84" stroke="#202124" stroke-width="4" />
+                <path d="M34 82 C38 35 64 17 105 22 C134 26 151 50 145 83 C114 69 76 66 34 82 Z" fill="#4d342f" stroke="#202124" stroke-width="4" />
+                <circle class="blink" cx="64" cy="91" r="6" fill="#202124" />
+                <circle class="blink" cx="105" cy="91" r="6" fill="#202124" />
+                <path d="M75 118 Q87 125 101 118" fill="none" stroke="#202124" stroke-width="4" stroke-linecap="round" class="mouth-closed" />
+                <ellipse cx="88" cy="118" rx="15" ry="9" fill="#642623" stroke="#202124" stroke-width="3" class="mouth-open" />
+                <ellipse cx="88" cy="118" rx="22" ry="7" fill="#642623" stroke="#202124" stroke-width="3" class="mouth-wide" />
+                <path d="M38 65 C22 86 26 118 43 139" fill="none" stroke="#202124" stroke-width="4" stroke-linecap="round" />
+              </g>
+              <g class="avatar avatar-right" transform="translate(438 86)">
+                <path d="M53 158 C38 199 29 220 22 262 H157 C146 216 136 190 119 156 Z" fill="var(--right-shirt)" stroke="#202124" stroke-width="4" />
+                <path d="M49 160 C30 178 21 201 18 224" fill="none" stroke="#202124" stroke-width="10" stroke-linecap="round" />
+                <path d="M122 159 C144 176 154 199 160 222" fill="none" stroke="#202124" stroke-width="10" stroke-linecap="round" />
+                <circle cx="87" cy="86" r="64" fill="#d99f73" stroke="#202124" stroke-width="4" />
+                <path d="M31 74 C39 35 72 18 108 25 C137 30 153 51 145 82 C117 58 75 56 31 74 Z" fill="#1f2027" stroke="#202124" stroke-width="4" />
+                <rect x="41" y="83" width="35" height="18" rx="7" fill="none" stroke="#202124" stroke-width="4" />
+                <rect x="98" y="83" width="35" height="18" rx="7" fill="none" stroke="#202124" stroke-width="4" />
+                <path d="M76 92 H98" stroke="#202124" stroke-width="4" />
+                <circle class="blink" cx="58" cy="92" r="4" fill="#202124" />
+                <circle class="blink" cx="116" cy="92" r="4" fill="#202124" />
+                <path d="M74 119 Q88 126 103 119" fill="none" stroke="#202124" stroke-width="4" stroke-linecap="round" class="mouth-closed" />
+                <ellipse cx="89" cy="119" rx="15" ry="9" fill="#642623" stroke="#202124" stroke-width="3" class="mouth-open" />
+                <ellipse cx="89" cy="119" rx="22" ry="7" fill="#642623" stroke="#202124" stroke-width="3" class="mouth-wide" />
+              </g>
+            </svg>
+          </div>
+          <div class="dialogue" aria-live="polite">
+            <div class="dialogue-name" data-speaker-name></div>
+            <p class="dialogue-text" data-dialogue-text></p>
+          </div>
+        </section>
+      </article>
+    </template>
+
+    <script>
+      const styleVariants = [
+        {
+          id: "cutout",
+          title: "Cutout Sitcom",
+          note: "Flat, funny, expressive",
+          className: "cutout",
+        },
+        {
+          id: "pixel",
+          title: "Pixel RPG",
+          note: "Game-like dialogue focus",
+          className: "pixel",
+        },
+        {
+          id: "paper",
+          title: "Paper Office",
+          note: "Warm handmade pitch room",
+          className: "paper",
+        },
+        {
+          id: "storybook",
+          title: "Arcade Storybook",
+          note: "Dramatic, demo-stage energy",
+          className: "storybook",
+        },
+      ];
+
+      let replay = {
+        left: { role: "founder", label: "Founder" },
+        right: { role: "interviewer", label: "YC Partner" },
+        turns: [
+          {
+            speaker_role: "interviewer",
+            spoken_text: "Welcome. Start simple: who has this problem, and why do they need it now?",
+          },
+          {
+            speaker_role: "founder",
+            spoken_text: "Support leaders at fast-growing teams need QA on every call, not a weekly sample.",
+          },
+          {
+            speaker_role: "interviewer",
+            spoken_text: "That sounds broad. What is the wedge that gets someone to switch this month?",
+          },
+          {
+            speaker_role: "founder",
+            spoken_text: "We flag missed escalation moments within minutes and tie them to concrete coaching clips.",
+          },
+        ],
+      };
+
+      let currentTurn = 0;
+      let playing = true;
+      let timer = null;
+
+      const grid = document.querySelector("#stylesGrid");
+      const template = document.querySelector("#sceneTemplate");
+      const statusText = document.querySelector("#statusText");
+      const playToggle = document.querySelector("#playToggle");
+
+      function sideForTurn(turn) {
+        const role = turn.speaker_role || turn.speakerRole || "";
+        if (role === replay.left.role) return "left";
+        if (role === replay.right.role) return "right";
+        return currentTurn % 2 === 0 ? "right" : "left";
+      }
+
+      function speakerNameForSide(side) {
+        return side === "left" ? replay.left.label : replay.right.label;
+      }
+
+      function renderPanels() {
+        grid.innerHTML = "";
+        for (const variant of styleVariants) {
+          const node = template.content.firstElementChild.cloneNode(true);
+          node.classList.add(variant.className);
+          node.dataset.variant = variant.id;
+          node.querySelector("h2").textContent = variant.title;
+          node.querySelector(".panel-title span").textContent = variant.note;
+          node.querySelector("[data-left-label]").textContent = replay.left.label;
+          node.querySelector("[data-right-label]").textContent = replay.right.label;
+          grid.appendChild(node);
+        }
+        renderTurn();
+      }
+
+      function renderTurn() {
+        const turn = replay.turns[currentTurn] || replay.turns[0];
+        if (!turn) return;
+
+        const side = sideForTurn(turn);
+        for (const panel of document.querySelectorAll(".style-panel")) {
+          const scene = panel.querySelector(".scene");
+          scene.classList.toggle("speaking-left", side === "left");
+          scene.classList.toggle("speaking-right", side === "right");
+          panel.querySelector("[data-speaker-name]").textContent = speakerNameForSide(side);
+          panel.querySelector("[data-dialogue-text]").textContent =
+            turn.spoken_text || turn.text || turn.heard_text || "";
+        }
+        statusText.textContent = `Turn ${currentTurn + 1} of ${replay.turns.length}.`;
+      }
+
+      function step(delta) {
+        currentTurn = (currentTurn + delta + replay.turns.length) % replay.turns.length;
+        renderTurn();
+      }
+
+      function startTimer() {
+        clearInterval(timer);
+        if (playing) {
+          timer = setInterval(() => step(1), 3600);
+        }
+      }
+
+      function normalizeRunJson(data) {
+        const leftRole = data.left?.role || "founder";
+        const rightRole = data.right?.role || "interviewer";
+        const title = (role) =>
+          role
+            .split(/[_-]/)
+            .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+            .join(" ");
+
+        return {
+          left: { role: leftRole, label: title(leftRole) },
+          right: { role: rightRole, label: title(rightRole) },
+          turns: (data.turns || [])
+            .filter((turn) => turn.spoken_text || turn.heard_text)
+            .map((turn) => ({
+              speaker_role: turn.speaker_role,
+              spoken_text: turn.spoken_text || turn.heard_text,
+            })),
+        };
+      }
+
+      document.querySelector("#prevTurn").addEventListener("click", () => {
+        step(-1);
+        startTimer();
+      });
+
+      document.querySelector("#nextTurn").addEventListener("click", () => {
+        step(1);
+        startTimer();
+      });
+
+      playToggle.addEventListener("click", () => {
+        playing = !playing;
+        playToggle.textContent = playing ? "Pause" : "Play";
+        startTimer();
+      });
+
+      document.querySelector("#transcriptFile").addEventListener("change", async (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        try {
+          const data = JSON.parse(await file.text());
+          const nextReplay = normalizeRunJson(data);
+          if (!nextReplay.turns.length) {
+            throw new Error("No turns with spoken_text or heard_text.");
+          }
+          replay = nextReplay;
+          currentTurn = 0;
+          renderPanels();
+          statusText.textContent = `Loaded ${file.name}.`;
+          startTimer();
+        } catch (error) {
+          statusText.textContent = `Could not load ${file.name}: ${error.message}`;
+        }
+      });
+
+      renderPanels();
+      startTimer();
+    </script>
+  </body>
+</html>

@@ -16,6 +16,7 @@
     "prompt": "prompts/founder_base.md",
     "prompt_variants": {
       "base": "prompts/founder_base.md",
+      "dynamic_base": "prompts/founder_dynamic_base.md",
       "improved_v1": "prompts/founder_improved_v1.md"
     }
   },

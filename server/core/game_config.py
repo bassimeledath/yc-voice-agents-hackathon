@@ -49,6 +49,22 @@ def build_role_prompt(game: str, side: str, variant: str = "base") -> str:
     )
 
 
+def build_role_prompt_from_text(game: str, side: str, role_context: str) -> str:
+    data = load_game_definition(game)
+    role_config = data[side]
+    return base_system_prompt(
+        title=role_config["title"],
+        role_context=role_context,
+        behavior=role_config["behavior"],
+    )
+
+
+def with_runtime_context(system_prompt: str, *, title: str, context: str) -> str:
+    if not context.strip():
+        return system_prompt
+    return f"{system_prompt}\n\nRuntime {title}:\n{context.strip()}"
+
+
 def opening_for(game: str, side: str) -> str:
     data = load_game_definition(game)
     return data[side]["opening"]
@@ -67,6 +83,9 @@ def build_agent(
     prompt_variant: str = "base",
     stt: STTName | None = None,
     voice_id: str | None = None,
+    runtime_context_title: str | None = None,
+    runtime_context: str | None = None,
+    prompt_text_override: str | None = None,
 ) -> AgentConfig:
     data = load_game_definition(game)
     role_config = data[side]
@@ -79,6 +98,17 @@ def build_agent(
     )
     env_name = f"{name.upper()}_GRADIUM_VOICE_ID"
 
+    if prompt_text_override is None:
+        system_prompt = build_role_prompt(game, side, prompt_variant)
+    else:
+        system_prompt = build_role_prompt_from_text(game, side, prompt_text_override)
+    if runtime_context:
+        system_prompt = with_runtime_context(
+            system_prompt,
+            title=runtime_context_title or "context",
+            context=runtime_context,
+        )
+
     return AgentConfig(
         name=name,
         stack=stack,
@@ -86,5 +116,5 @@ def build_agent(
         role=role_config["role"],
         stt=stt or default_stt_for(stack),
         voice_id=_voice_id(voice_id, env_name, default_voice),
-        system_prompt=build_role_prompt(game, side, prompt_variant),
+        system_prompt=system_prompt,
     )

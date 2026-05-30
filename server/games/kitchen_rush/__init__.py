@@ -1,0 +1,1 @@
+"""Kitchen Rush game package."""

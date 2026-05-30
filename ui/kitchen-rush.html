@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Kitchen Rush — Replay</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./kitchen-rush.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="title">
+          <span class="eyebrow">Kitchen Rush</span>
+          <h1 id="runTitle">Lunch Shift</h1>
+        </div>
+        <div class="controls">
+          <select id="runSelect" aria-label="Select run"></select>
+          <button id="restartBtn" type="button" title="Restart">↺</button>
+          <button id="playBtn" type="button" title="Play / pause">❚❚</button>
+          <button id="speedBtn" type="button" title="Playback speed">1×</button>
+          <label class="file-button" for="resultsFile">Load JSON</label>
+          <input id="resultsFile" type="file" accept="application/json,.json" />
+        </div>
+      </header>
+
+      <div class="stage-wrap">
+        <div class="stage" id="stage">
+          <!-- top HUD: clock + result, then the order-ticket rail -->
+          <div class="hud-clock">
+            <span class="clock-val" id="clockValue">0s</span>
+            <span class="clock-sep">/</span>
+            <span class="clock-max" id="clockMax">90s</span>
+            <span class="result-pill" id="resultPill">Live</span>
+          </div>
+
+          <div class="ticket-rail" id="ticketRail"></div>
+
+          <!-- manager call-out -->
+          <div class="manager-banner" id="managerBanner" hidden>
+            <span class="manager-tag">Manager</span>
+            <span id="managerText"></span>
+          </div>
+
+          <!-- station effect anchors (filled by JS) -->
+          <div class="fx-layer" id="fxLayer"></div>
+
+          <!-- cooking pots live here, anchored to the stove -->
+          <div class="cook-layer" id="cookLayer"></div>
+
+          <!-- the chef -->
+          <div class="chef" id="chef">
+            <div class="chef-bubble" id="chefBubble" hidden></div>
+            <img class="chef-sprite" id="chefSprite" alt="chef" src="./assets/chef-idle.png" />
+            <div class="chef-shadow"></div>
+          </div>
+
+          <!-- end-of-shift stamp -->
+          <div class="verdict" id="verdict" hidden>
+            <div class="verdict-card" id="verdictCard">
+              <span class="verdict-stamp" id="verdictStamp">WIN</span>
+              <span class="verdict-score" id="verdictScore">Score 0</span>
+              <span class="verdict-sub" id="verdictSub"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- thin footer: current action + scrubber -->
+        <div class="footer">
+          <div class="action-line">
+            <span class="action-name" id="actionName">Ready</span>
+            <span class="action-result" id="actionResult">Waiting for service…</span>
+          </div>
+          <input
+            class="scrubber"
+            id="scrubber"
+            type="range"
+            min="0"
+            max="100"
+            value="0"
+            step="1"
+            aria-label="Timeline"
+          />
+        </div>
+      </div>
+    </main>
+
+    <script src="./sample-runs.js"></script>
+    <script src="./kitchen-rush.js"></script>
+  </body>
+</html>
