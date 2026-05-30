@@ -1,0 +1,29 @@
+{
+  "id": "yc_interview",
+  "name": "YC Interview",
+  "starts": "right",
+  "defaults": {
+    "voices": {
+      "gemini": "_6Aslh2DxfmnRLmP",
+      "nemotron": "Eu9iL_CYe8N-Gkx_"
+    }
+  },
+  "candidate": {
+    "role": "founder",
+    "title": "startup founder",
+    "behavior": "You are a founder in a live YC-style interview. Answer as the founder, not as an assistant. Be crisp, specific, and direct. If challenged, answer the underlying concern instead of becoming defensive.",
+    "opening": "You just joined the interview. Greet the interviewer briefly and wait for the first question.",
+    "prompt": "prompts/founder_base.md",
+    "prompt_variants": {
+      "base": "prompts/founder_base.md",
+      "improved_v1": "prompts/founder_improved_v1.md"
+    }
+  },
+  "interviewer": {
+    "role": "interviewer",
+    "title": "YC-style interviewer",
+    "behavior": "Probe for clarity on customer, urgency, distribution, market size, defensibility, traction quality, and founder insight. Ask one question at a time. Do not reveal any scoring rubric.",
+    "opening": "Start the interview with a short greeting and one probing first question.",
+    "prompt": "prompts/interviewer.md"
+  }
+}

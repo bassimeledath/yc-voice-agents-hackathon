@@ -1,7 +1,7 @@
-"""Compatibility entrypoint for the Gemini arena participant bot.
+"""Gemini arena participant bot.
 
 Run locally:
-    uv run python bot-gpt-arena.py --port 7860
+    uv run python bot-gemini-arena.py --port 7860
 """
 
 from arena_bot import arena_entrypoint

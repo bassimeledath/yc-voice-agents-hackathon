@@ -28,7 +28,6 @@ from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.services.gradium.stt import GradiumSTTService
 from pipecat.services.gradium.tts import GradiumTTSService
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
@@ -43,7 +42,7 @@ from nvidia_stt import NVidiaWebSocketSTTService
 
 load_dotenv(override=True)
 
-StackName = Literal["gpt", "nemotron"]
+StackName = Literal["gemini", "gpt", "nemotron"]
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -77,16 +76,21 @@ async def run_arena_bot(
     tools = ToolsSchema(standard_tools=[end_call])
     system_instruction = build_system_instruction()
 
-    if stack == "gpt":
+    if stack in {"gemini", "gpt"}:
+        from pipecat.services.google.llm import GoogleLLMService
+
         stt = GradiumSTTService(
             api_key=os.environ["GRADIUM_API_KEY"],
             settings=GradiumSTTService.Settings(language=Language.EN),
         )
-        llm = OpenAIResponsesLLMService(
-            api_key=os.environ["OPENAI_API_KEY"],
-            settings=OpenAIResponsesLLMService.Settings(
-                model=os.getenv("OPENAI_MODEL", "gpt-4.1"),
+        llm = GoogleLLMService(
+            api_key=os.environ["GEMINI_API_KEY"],
+            settings=GoogleLLMService.Settings(
+                model=os.getenv("GEMINI_MODEL", "gemini-flash-latest"),
                 system_instruction=system_instruction,
+                thinking=GoogleLLMService.ThinkingConfig(
+                    thinking_budget=_env_int("GEMINI_THINKING_BUDGET", 0)
+                ),
             ),
         )
         tts_default_voice = "_6Aslh2DxfmnRLmP"
