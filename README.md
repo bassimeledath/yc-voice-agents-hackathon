@@ -15,7 +15,7 @@
 
 ## 2. Video
 
-- Demo video: **TODO: add video link**
+- Demo video: https://www.loom.com/share/fda5517a9df94c89812810db932d6397
 - The video is under 60 seconds and shows:
   - the baseline agent making invalid kitchen actions and missing a deadline
   - the Cekura-tuned agent performing better on the same scenario
