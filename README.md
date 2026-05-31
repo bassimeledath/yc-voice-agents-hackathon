@@ -1,5 +1,7 @@
 # Kitchen Rush Voice Agent Benchmark
 
+<img src="docs/images/kitchen-rush.png" alt="Kitchen Rush voice-agent game UI" width="760">
+
 ## 1. What is this?
 
 - Kitchen Rush is a voice-agent game and benchmark inspired by **Overcooked**.
@@ -23,15 +25,11 @@
   - the visual game replay with spoken manager/chef audio
   - live human-manager mode, where a person can speak orders and the agent speaks back while calling tools
 
-## Screenshots
-
-![Kitchen Rush demo](docs/images/kitchen-rush.png)
-
-![Cekura simulation dashboard](docs/images/cekura.png)
-
 ## 3. How we used Cekura, Nemotron, and Pipecat
 
 ### Cekura
+
+<img src="docs/images/cekura.png" alt="Cekura dashboard showing Kitchen Rush evaluation runs" width="720">
 
 - We used Cekura as the evaluation and self-improvement loop for the Kitchen Rush agent.
 - The goal was to turn agent quality into repeatable measurements instead of subjective demo impressions.
