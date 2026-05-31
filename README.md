@@ -16,11 +16,18 @@
 ## 2. Video
 
 - Demo video: https://www.loom.com/share/fda5517a9df94c89812810db932d6397
+- **NOTE:** Apologies: the recording did not capture the agent's speech audio, even though the narrated replay and voice pipeline generated it during the demo.
 - The video is under 60 seconds and shows:
   - the baseline agent making invalid kitchen actions and missing a deadline
   - the Cekura-tuned agent performing better on the same scenario
   - the visual game replay with spoken manager/chef audio
   - live human-manager mode, where a person can speak orders and the agent speaks back while calling tools
+
+## Screenshots
+
+![Kitchen Rush demo](docs/images/kitchen-rush.png)
+
+![Cekura simulation dashboard](docs/images/cekura.png)
 
 ## 3. How we used Cekura, Nemotron, and Pipecat
 
